@@ -1,3 +1,60 @@
-node_modules/
-dist/
+# =========================
+# Environment / Secrets
+# =========================
 .env
+.env.*
+!.env.example
+
+# =========================
+# Python Backend
+# =========================
+backend/venv/
+backend/.venv/
+backend/__pycache__/
+backend/**/*.py[cod]
+backend/*.py[cod]
+
+# Python cache / test files
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# =========================
+# Frontend - Node
+# =========================
+frontend_/node_modules/
+frontend_/dist/
+frontend_/.vite/
+
+# =========================
+# IDE / Editor
+# =========================
+.vscode/
+.idea/
+
+# =========================
+# OS generated files
+# =========================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# =========================
+# Temporary files
+# =========================
+*.tmp
+*.temp
+*.log
+
+# =========================
+# Office temporary files
+# =========================
+~$*
+
+# =========================
+# Build / generated files
+# =========================
+dist/
+build/
