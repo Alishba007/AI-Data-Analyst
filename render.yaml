@@ -1,0 +1,25 @@
+# render.yaml
+# Render Blueprint — lets you deploy by connecting this repo and clicking
+# "New Blueprint Instance" instead of manually configuring a web service.
+# See DEPLOYMENT.md for the full step-by-step walkthrough (Neon + Groq
+# setup happen outside Render, in their own dashboards).
+
+services:
+  - type: web
+    name: ai-data-analyst-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: LLM_PROVIDER
+        value: groq
+      - key: GROQ_API_KEY
+        sync: false  # set manually in Render's dashboard — never commit real keys
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      - key: DATABASE_URL
+        sync: false  # your Neon connection string — set manually
+      - key: JWT_SECRET
+        generateValue: true  # Render generates a real random secret for you

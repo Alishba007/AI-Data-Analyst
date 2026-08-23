@@ -1,0 +1,70 @@
+:root {
+  /* Color tokens — warm paper ledger, not the generic cream/terracotta pairing */
+  --color-paper: #f6f5f0;
+  --color-paper-raised: #fbfaf6;
+  --color-ink: #1b2430;
+  --color-ink-soft: #5b6472;
+  --color-ledger-line: #ddd9cc;
+  --color-accent-teal: #2f6f5e;
+  --color-accent-teal-soft: #e3ece9;
+  --color-accent-amber: #c98a2c;
+  --color-error: #b3432b;
+
+  /* Type tokens */
+  --font-display: "Fraunces", Georgia, serif;
+  --font-body: "IBM Plex Sans", -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", "SF Mono", Consolas, monospace;
+
+  --radius-md: 10px;
+  --radius-sm: 6px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font-family: inherit;
+}
+
+/* Reduced-motion respect — the receipt-reveal and message-in animations
+   both check this before applying real motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Visible keyboard focus, applied broadly rather than per-component */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--color-accent-teal);
+  outline-offset: 2px;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-ledger-line);
+  border-radius: 999px;
+}
