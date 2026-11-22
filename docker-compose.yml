@@ -36,7 +36,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/salesdb
+      DATABASE_URL: ${DATABASE_URL}
       # OLLAMA_BASE_URL: http://ollama:11434
       # OLLAMA_MODEL: qwen2.5
       LLM_PROVIDER: ${LLM_PROVIDER:-groq}
