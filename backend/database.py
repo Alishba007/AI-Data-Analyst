@@ -12,7 +12,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
 # Example: postgresql+psycopg2://user:password@localhost:5432/salesdb
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql+psycopg2://postgres:postgres@localhost:5432/salesdb")
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
 
 def get_engine(database_url: str = DATABASE_URL) -> Engine:
