@@ -56,19 +56,47 @@ def _sanitize_column_names(df: pd.DataFrame) -> pd.DataFrame:
 
 def read_upload(file_path: str, filename: str) -> pd.DataFrame:
     """
-    Read a CSV or Excel file into a DataFrame. `filename` is used only to
-    detect the format (extension) — pass the original uploaded name even
-    if `file_path` is a temp path like /tmp/xyz.tmp.
+    Read a CSV or Excel file into a DataFrame.
+
+    CSV files may use different encodings, so UTF-8 is tried first,
+    followed by common encodings used by Windows/Excel-generated files.
     """
     ext = os.path.splitext(filename)[1].lower()
 
     if ext == ".csv":
-        df = pd.read_csv(file_path)
+        encodings = [
+            "utf-8",
+            "utf-8-sig",
+            "cp1252",
+            "latin1",
+        ]
+
+        df = None
+        last_error = None
+
+        for encoding in encodings:
+            try:
+                df = pd.read_csv(
+                    file_path,
+                    encoding=encoding
+                )
+                break
+            except UnicodeDecodeError as e:
+                last_error = e
+
+        if df is None:
+            raise ValueError(
+                "Could not decode the CSV file. "
+                "Please save the CSV as UTF-8 and try again."
+            ) from last_error
+
     elif ext in (".xlsx", ".xls"):
         df = pd.read_excel(file_path)
+
     else:
         raise ValueError(
-            f"Unsupported file type '{ext}'. Only .csv, .xlsx, and .xls are supported."
+            f"Unsupported file type '{ext}'. "
+            "Only .csv, .xlsx, and .xls are supported."
         )
 
     if df.empty:

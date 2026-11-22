@@ -16,12 +16,13 @@ Test:
 import os
 import shutil
 import tempfile
-
+import traceback
 from fastapi import Depends, FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 
-from agent import build_sql_agent, ask, generate_insights
+from agent import build_sql_agent, ask
+from insights import generate_insights_fast
 from auth import (
     authenticate_user,
     create_token,
@@ -210,12 +211,20 @@ def upload_file(file: UploadFile = File(...), user: dict = Depends(get_current_u
 @app.post("/insights", response_model=InsightsResponse)
 def insights(req: InsightsRequest, user: dict = Depends(get_current_user)):
     user_agent = _get_user_agent(user["id"])
-    db, agent = user_agent["db"], user_agent["agent"]
+    db = user_agent["db"]
 
     if req.table_name not in db.get_usable_table_names():
         raise HTTPException(status_code=404, detail=f"Table '{req.table_name}' not found.")
 
-    result = generate_insights(req.table_name, agent=agent, db=db, thread_id=f"insights-{user['id']}")
+    try:
+        result = generate_insights_fast(
+            req.table_name,
+            engine=db._engine,
+            schema=user_schema_name(user["id"]),
+        )
+    except Exception:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Couldn't generate insights for that table.")
 
     charts = []
     for rows in result.datasets:
@@ -224,7 +233,6 @@ def insights(req: InsightsRequest, user: dict = Depends(get_current_user)):
             charts.append(chart)
 
     return InsightsResponse(summary=result.summary, sql_queries=result.sql_queries, charts=charts)
-
 
 @app.post("/ask", response_model=AnswerResponse)
 def ask_question(req: QuestionRequest, user: dict = Depends(get_current_user)):

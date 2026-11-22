@@ -515,6 +515,28 @@
   cursor: default;
 }
 
+/* ---------- Overflow safety for long / Markdown-style answers ---------- */
+
+.app__main,
+.chat,
+.entry {
+  min-width: 0;                 /* lets flex children shrink instead of stretching */
+}
+
+.chat__feed {
+  overflow-x: hidden;           /* no sideways scrollbar for the whole feed */
+}
+
+.entry__body {
+  overflow-wrap: anywhere;      /* breaks long tokens like |---|---| */
+  word-break: break-word;
+}
+
+.chart-display {
+  max-width: 100%;
+  overflow-x: auto;             /* wide charts scroll inside their own box */
+}
+
 /* ---------- Responsive ---------- */
 
 @media (max-width: 640px) {
