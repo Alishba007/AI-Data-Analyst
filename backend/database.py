@@ -14,6 +14,13 @@ from sqlalchemy.engine import Engine
 # Example: postgresql+psycopg2://user:password@localhost:5432/salesdb
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
+if DATABASE_URL and DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace(
+        "postgresql://",
+        "postgresql+psycopg://",
+        1
+    )
+
 
 def get_engine(database_url: str = DATABASE_URL) -> Engine:
     """

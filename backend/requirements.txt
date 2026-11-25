@@ -15,3 +15,4 @@ openpyxl
 bcrypt
 pyjwt
 email-validator
+psycopg[binary]
