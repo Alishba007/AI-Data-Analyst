@@ -21,10 +21,9 @@ from database import get_engine, ensure_user_schema
 
 # In production, set JWT_SECRET to a long random value via environment
 # variable — never rely on this fallback outside local development.
-JWT_SECRET = os.environ.get("JWT_SECRET", "dev-only-insecure-secret-change-me")
-JWT_ALGORITHM = "HS256"
-JWT_EXPIRY_HOURS = 24 * 7  # 1 week — reasonable for a demo app, not a bank
-
+JWT_SECRET = os.environ.get("JWT_SECRET")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM")
+JWT_EXPIRY_HOURS = int(os.getenv("JWT_EXPIRY_HOURS"))
 security = HTTPBearer()
 
 
