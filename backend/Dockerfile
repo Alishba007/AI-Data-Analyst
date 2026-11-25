@@ -1,16 +1,16 @@
-# backend/Dockerfile
+
 FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install deps first so Docker can cache this layer — it only re-runs
-# when requirements.txt actually changes, not on every code edit.
+# Install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Now copy the actual application code
+# Copy application code
 COPY . .
 
 EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Use Railway's assigned port, falling back to 8000 locally
+CMD ["sh", "-c", "exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
