@@ -35,7 +35,7 @@ from database import ensure_user_schema, get_database, user_schema_name
 from file_processor import process_upload
 
 app = FastAPI(title="AI Data Analyst")
-origins = os.environ.get("CORS_ORIGINS", "http://localhost:5173","https://ai-data-analyst-two-tau.vercel.app").split(",")
+origins = os.environ.get("CORS_ORIGINS","https://ai-data-analyst-two-tau.vercel.app").split(",")
 # Allow the frontend (Vite dev server, or wherever it's deployed) to call
 # this API directly. Wide open for local dev — tighten allow_origins to
 # your actual deployed frontend URL before shipping this to production.
