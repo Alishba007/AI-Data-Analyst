@@ -1,169 +1,139 @@
 """
 file_processor.py
-------------------
-Handles CSV/Excel uploads: reads the file, cleans up column names, lets
-pandas infer types, and loads it into Postgres as a real table — so the
-SQL agent can query an uploaded file exactly the same way it queries any
-other table. No separate "file mode" logic needed anywhere else.
+-----------------
+CSV/Excel upload -> clean DataFrame -> Postgres table in the user's own schema.
+
+Hardening vs. the old version:
+- Row / column caps (read with nrows so a huge file can't eat all RAM).
+- Per-user table quota (unrestricted resource consumption).
+- `schema` is REQUIRED: forgetting it can no longer drop data into the shared
+  public schema.
+- Column names are de-duplicated (two headers that sanitize to the same name
+  used to crash to_sql) and truncated to Postgres' 63-byte limit.
+- Sanitized column names are [a-z0-9_] only, so a malicious CSV header cannot
+  carry prompt-injection text into the LLM prompt.
+- Parser errors become generic ValueErrors (no internals leaked to the client).
+- Columns named *date* are parsed to real timestamps when >=90% of values parse.
 """
 
+import logging
 import os
 import re
 import uuid
+import warnings
 
 import pandas as pd
 from sqlalchemy import inspect
 
 from database import get_engine
 
-# Uploaded tables live in their own schema-ish prefix so they're easy to
-# spot and don't collide with real business tables (e.g. an uploaded
-# "sales.csv" won't silently overwrite a "sales" table already in the DB).
+logger = logging.getLogger("file_processor")
+
 UPLOAD_TABLE_PREFIX = "uploaded_"
+MAX_ROWS = 200_000
+MAX_COLS = 100
+MAX_TABLES_PER_USER = 20
 
 
 def _sanitize_table_name(filename: str) -> str:
-    """
-    Turn 'Q3 Sales Report (final).xlsx' into something Postgres accepts as
-    an identifier: 'uploaded_q3_sales_report_final'. A short random suffix
-    is appended so two uploads with the same filename don't collide.
-    """
-    stem = os.path.splitext(filename)[0]
-    stem = stem.lower().strip()
-    stem = re.sub(r"[^a-z0-9]+", "_", stem).strip("_")
-    if not stem:
-        stem = "table"
-    # Postgres identifiers max out at 63 bytes — leave room for prefix/suffix.
-    stem = stem[:40]
-    suffix = uuid.uuid4().hex[:6]
-    return f"{UPLOAD_TABLE_PREFIX}{stem}_{suffix}"
+    stem = os.path.splitext(filename)[0].lower().strip()
+    stem = re.sub(r"[^a-z0-9]+", "_", stem).strip("_") or "table"
+    stem = stem[:40]  # 63-byte identifier limit: leave room for prefix + suffix
+    return f"{UPLOAD_TABLE_PREFIX}{stem}_{uuid.uuid4().hex[:6]}"
 
 
 def _sanitize_column_names(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    'Order Date', 'Unit Price ($)' etc. become 'order_date', 'unit_price'.
-    The agent writes SQL using these names, so they need to be predictable
-    snake_case identifiers, not whatever a spreadsheet author typed.
-    """
-    new_columns = []
+    """'Order Date' -> order_date. Duplicates become order_date, order_date_2, ..."""
+    seen: dict[str, int] = {}
+    cols = []
     for col in df.columns:
-        clean = str(col).strip().lower()
-        clean = re.sub(r"[^a-z0-9]+", "_", clean).strip("_")
-        new_columns.append(clean or "unnamed_column")
-    df.columns = new_columns
+        clean = re.sub(r"[^a-z0-9]+", "_", str(col).strip().lower()).strip("_")[:50] or "unnamed_column"
+        n = seen.get(clean, 0) + 1
+        seen[clean] = n
+        cols.append(clean if n == 1 else f"{clean}_{n}")
+    df.columns = cols
+    return df
+
+
+def _parse_date_columns(df: pd.DataFrame) -> pd.DataFrame:
+    for c in df.columns:
+        if "date" in c and df[c].dtype == object and df[c].notna().any():
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                parsed = pd.to_datetime(df[c], errors="coerce")
+            if parsed.notna().sum() >= 0.9 * df[c].notna().sum():
+                df[c] = parsed
     return df
 
 
 def read_upload(file_path: str, filename: str) -> pd.DataFrame:
-    """
-    Read a CSV or Excel file into a DataFrame.
-
-    CSV files may use different encodings, so UTF-8 is tried first,
-    followed by common encodings used by Windows/Excel-generated files.
-    """
     ext = os.path.splitext(filename)[1].lower()
+    limit = MAX_ROWS + 1  # read one extra row so we can detect "too many"
 
     if ext == ".csv":
-        encodings = [
-            "utf-8",
-            "utf-8-sig",
-            "cp1252",
-            "latin1",
-        ]
-
-        df = None
-        last_error = None
-
-        for encoding in encodings:
+        df, last_err = None, None
+        for enc in ("utf-8-sig", "cp1252", "latin1"):   # utf-8-sig also reads plain utf-8
             try:
-                df = pd.read_csv(
-                    file_path,
-                    encoding=encoding
-                )
+                df = pd.read_csv(file_path, encoding=enc, nrows=limit)
                 break
             except UnicodeDecodeError as e:
-                last_error = e
-
+                last_err = e
+            except (pd.errors.ParserError, pd.errors.EmptyDataError) as e:
+                logger.info("csv parse error: %s", e)
+                raise ValueError("The CSV file could not be parsed. Check that it is a valid CSV.")
         if df is None:
-            raise ValueError(
-                "Could not decode the CSV file. "
-                "Please save the CSV as UTF-8 and try again."
-            ) from last_error
-
+            raise ValueError("Could not decode the CSV file. Please save it as UTF-8 and try again.") from last_err
     elif ext in (".xlsx", ".xls"):
-        df = pd.read_excel(file_path)
-
+        try:
+            df = pd.read_excel(file_path, nrows=limit)
+        except Exception:
+            logger.exception("excel read failed")
+            raise ValueError("The spreadsheet could not be read. Check that it is a valid Excel file.")
     else:
-        raise ValueError(
-            f"Unsupported file type '{ext}'. "
-            "Only .csv, .xlsx, and .xls are supported."
-        )
+        raise ValueError("Unsupported file type. Only .csv, .xlsx and .xls are supported.")
 
     if df.empty:
         raise ValueError("The uploaded file has no rows.")
-
+    if len(df) > MAX_ROWS:
+        raise ValueError(f"The file has too many rows (max {MAX_ROWS:,}).")
+    if df.shape[1] > MAX_COLS:
+        raise ValueError(f"The file has too many columns (max {MAX_COLS}).")
     return df
 
 
-def load_dataframe_to_db(df: pd.DataFrame, table_name: str, schema: str | None = None) -> dict:
-    """
-    Write a DataFrame into Postgres as a new table. Returns a small summary
-    dict describing what was loaded, so the API layer can tell the user
-    (and so the agent's first response can reference it directly).
-
-    schema:
-        Pass the uploading user's schema (see database.ensure_user_schema)
-        so their data lands in their own private namespace, not the
-        shared public schema every user could otherwise see.
-    """
+def load_dataframe_to_db(df: pd.DataFrame, table_name: str, schema: str) -> dict:
     engine = get_engine()
-
-    df.to_sql(table_name, engine, schema=schema, if_exists="replace", index=False)
-
-    inspector = inspect(engine)
-    columns = [col["name"] for col in inspector.get_columns(table_name, schema=schema)]
-
-    return {
-        "table_name": table_name,
-        "row_count": len(df),
-        "columns": columns,
-    }
+    df.to_sql(table_name, engine, schema=schema, if_exists="fail", index=False, chunksize=5000)
+    columns = [c["name"] for c in inspect(engine).get_columns(table_name, schema=schema)]
+    return {"table_name": table_name, "row_count": len(df), "columns": columns}
 
 
-def process_upload(file_path: str, filename: str, schema: str | None = None) -> dict:
+def process_upload(file_path: str, filename: str, schema: str) -> dict:
     """
-    Full pipeline: read the file, clean it up, load it into Postgres.
-    This is the single function main.py's upload endpoint should call.
-
-    schema:
-        The uploading user's private schema — always pass this in a
-        multi-user context (see main.py). Omitting it writes to the
-        shared public schema, visible to every user.
-
-    Returns:
-        {
-            "table_name": "uploaded_q3_sales_report_final_a1b2c3",
-            "row_count": 1204,
-            "columns": ["order_date", "region", "revenue", ...],
-        }
+    read -> clean -> load. `schema` is mandatory (the user's private schema).
+    Returns {"table_name", "row_count", "columns"}.
     """
+    if not schema:
+        raise ValueError("A target schema is required.")
+
+    existing = inspect(get_engine()).get_table_names(schema=schema)
+    if len(existing) >= MAX_TABLES_PER_USER:
+        raise ValueError(f"Dataset limit reached ({MAX_TABLES_PER_USER}). Remove an old dataset first.")
+
     df = read_upload(file_path, filename)
     df = _sanitize_column_names(df)
-    table_name = _sanitize_table_name(filename)
-    return load_dataframe_to_db(df, table_name, schema=schema)
+    df = _parse_date_columns(df)
+    return load_dataframe_to_db(df, _sanitize_table_name(filename), schema=schema)
 
 
 if __name__ == "__main__":
-    # Manual smoke test:
-    #   python file_processor.py path/to/some_file.csv
+    # Manual smoke test: python file_processor.py <path> <user_id>
     import sys
+    from database import ensure_user_schema
 
-    if len(sys.argv) != 2:
-        print("Usage: python file_processor.py <path_to_csv_or_xlsx>")
+    if len(sys.argv) != 3:
+        print("Usage: python file_processor.py <path_to_csv_or_xlsx> <user_id>")
         sys.exit(1)
-
-    path = sys.argv[1]
-    result = process_upload(path, os.path.basename(path))
-    print("Loaded into table:", result["table_name"])
-    print("Rows:", result["row_count"])
-    print("Columns:", result["columns"])
+    sch = ensure_user_schema(int(sys.argv[2]))
+    res = process_upload(sys.argv[1], os.path.basename(sys.argv[1]), schema=sch)
+    print(res)
